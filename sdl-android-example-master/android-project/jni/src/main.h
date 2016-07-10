@@ -1,0 +1,177 @@
+
+#include <SDL_main.h>
+#include <SDL_mixer.h>
+#include <time.h>
+#include <SDL.h>
+#include <SDL_image.h>
+#include <SDL_ttf.h>
+#include <stdio.h>
+#include <math.h>
+#include <SDL_opengles.h>
+#include <unistd.h>
+#include <GLES/gl.h>
+#include <GLES/glext.h>
+#include <android/log.h>
+#define PI 3.141592653
+#define MAX_BULLETS 32
+#define MAX_ASTEROIDS 256
+#define MAX_ENEMY 16
+//#define MAX_PARTICLES 128
+//#define MAX_EXPLOSIONS 3
+#define DELTA_P 16				// Physics update interval in milliseconds ~= 60fps
+#define DELTA 1					// velocity factor
+#define MAX_POWERUPS 3
+
+enum{
+	CRASH,
+	THRUST,
+	FIRE,
+	HIT,
+	SHIELD,
+	IMPACT,
+	SELECTS,
+	BOUNCE,
+	HYPER,
+	ENTRY,
+	POWER,
+	MAX_SOUNDS
+};
+
+enum{
+	P1LEFT,
+	P1RIGHT,
+	P1THRUST,
+	P1FIRE,
+	P1SHIELD,
+	P2LEFT,
+	P2RIGHT,
+	P2THRUST,
+	P2FIRE,
+	P2SHIELD,
+	MOUSE_ENABLE
+};
+
+typedef struct Sound{
+	Mix_Chunk *effect;
+}Sound;
+
+typedef struct {float x; float y;}Vector;
+
+typedef struct{float x; float y;}Camera;
+
+typedef struct {Vector position;
+				int type;
+				int age;}powerup;
+
+typedef struct {Vector velocity;
+				Vector position;
+				float age ;
+				int state;}particle;
+				
+typedef struct {
+				Vector position;		// current position
+				float angle;			// current angle of rotation in radians
+				float angle_inc;
+				Vector velocity;	
+				int size;				// size of asteroid
+				int has_collided;
+			}asteroid;
+
+typedef struct {
+				Vector position;
+				Vector velocity;
+			}bullet;
+
+typedef struct ship{
+				particle thrust[12];
+				Vector position;		
+				float angle;
+				Vector velocity;				
+				float shield_power;
+				int shield_timer;
+				int shield;
+				int gun;
+				void (*fire)(bullet *, struct ship*);
+			}ship;
+			
+typedef struct {
+				int w;
+				int h;
+				GLuint t;
+			}texture;
+
+typedef struct {ship sh;
+				bullet bulls[MAX_BULLETS];
+				int lives;
+				int score;
+					}Player;
+					
+typedef struct{	ship sh;
+				bullet bulls[MAX_BULLETS];
+				int plan;
+				float target;
+				float target_mag;
+				int skill;
+				}enemy;
+
+typedef struct{ float age;
+				float x;
+				float y;
+				}explosion;
+				
+Sound sound[MAX_SOUNDS];				// Array for sounds index
+int dmh;								// actual resolution
+int dmw;
+GLuint powertex;					
+
+int layout[11];							// Array for current keymap
+int run_state;
+int init_sdl();
+
+void initGL();
+void close_sdl();
+void init_sound();
+
+int main_menu(GLuint tex);
+// INITS
+void init_player(Player *p, int id, int num);
+void init_particles();
+void init_thruster(ship *sh);
+void init_level(asteroid *field, Player *p, enemy *en, int level, int mode);
+void init_asteroid(asteroid *dave, int size);
+void create_enemies(enemy *en, int num);
+// EVENTS
+void set_parts(int x, int y);
+void create_bullet(bullet *, ship *);
+void create_bullet_rel(bullet *bulls, ship *sh);
+void split_asteroid(asteroid *field, int a);
+void collision_detect(asteroid *field, Player *, enemy *en);
+void dual_collisions(Player *, Player *);
+void play_sound(int index, int loop);
+void kill_enemy(enemy *en, int id);
+// MOVE
+void move_asteroid(asteroid *field);
+void move_ship(ship *sh);
+void move_bullets(bullet *bulls);
+void move_enemies(enemy *en, asteroid *field, Player *p, int mode);
+// RENDER
+void draw_asteroids(asteroid *field);
+void draw_ship(ship *sh, int type);
+void draw_shield(ship *sh);
+void draw_bullets(bullet *bulls);
+void draw_scorebar(Player *, int mode);
+void draw_background(GLuint);
+void draw_particles(void);
+void draw_powerup(powerup *p);
+//void draw_enemies(enemy *en, int num); defunct
+void draw_explosion(explosion *e);
+void draw_menu_item(int x, int y, char text[], int colour, int size);
+void high_scores(int p1score, int p2score, GLuint tex);
+
+GLuint load_texture(const char *s);
+void render_text(texture *t, char s[], int c, int size);
+
+void level_transition(int level);
+int keyboard_events(Player *p1, Player *p2, int mode);
+int power_two(int);
+

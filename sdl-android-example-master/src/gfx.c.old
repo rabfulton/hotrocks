@@ -1,0 +1,661 @@
+#include "main.h"
+#define APPNAME "MyApp"
+SDL_Window* mywindow = NULL;				// the usual window
+SDL_Renderer* myrenderer = NULL;			// accelerated renderer instead of surface
+
+//OpenGL context
+SDL_GLContext gContext;
+extern particle* parts;
+extern explosion* explode;
+extern int MAX_PARTICLES;
+extern int no_of_asteroids;
+extern int SCREEN_WIDTH;
+extern int SCREEN_HEIGHT;
+extern Camera camera;
+TTF_Font	*score_font = NULL;
+TTF_Font	*title_font = NULL;
+TTF_Font	*menu_font = NULL;
+
+int init_sdl(){
+
+
+	if (SDL_Init(SDL_INIT_VIDEO) < 0){
+		printf("init error! sdl: %s\n", SDL_GetError());
+		__android_log_print(ANDROID_LOG_VERBOSE, APPNAME, "SDL_INIT_VIDEO!!!! sdl: %s", SDL_GetError());
+		return 1;
+	}
+
+
+	//SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 2);
+	//SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
+
+	SDL_GL_SetAttribute( SDL_GL_RED_SIZE, 8 );
+	   SDL_GL_SetAttribute( SDL_GL_GREEN_SIZE, 8 );
+	   SDL_GL_SetAttribute( SDL_GL_BLUE_SIZE, 8 );
+	   SDL_GL_SetAttribute( SDL_GL_ALPHA_SIZE, 8 );
+//	   SDL_GL_SetAttribute( SDL_GL_DOUBLEBUFFER, 1 );
+//	   SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE,        16);
+//	   SDL_GL_SetAttribute(SDL_GL_BUFFER_SIZE,       32);
+//
+	   SDL_GL_SetAttribute(SDL_GL_ACCUM_RED_SIZE,     8);
+	   SDL_GL_SetAttribute(SDL_GL_ACCUM_GREEN_SIZE,   8);
+	   SDL_GL_SetAttribute(SDL_GL_ACCUM_BLUE_SIZE,    8);
+	   SDL_GL_SetAttribute(SDL_GL_ACCUM_ALPHA_SIZE,   8);
+	   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 1);
+	   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+	SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengles");
+
+	mywindow = SDL_CreateWindow("hot", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 0, 0, SDL_WINDOW_SHOWN | SDL_WINDOW_OPENGL);
+	if (mywindow == NULL){
+		printf("error creating window! sdl:%s\n", SDL_GetError());
+		__android_log_print(ANDROID_LOG_VERBOSE, APPNAME, "create window!!!! sdl: %s", SDL_GetError());
+		return 1;
+	}
+
+	gContext = SDL_GL_CreateContext(mywindow); 	//Create context
+	SDL_GL_SetSwapInterval(1);					//Use Vsync
+	initGL();
+
+	int flags = IMG_INIT_PNG;
+
+	if (!(IMG_Init(flags) & flags)){
+		printf("png init error! sdl: %s\n", SDL_GetError());
+		__android_log_print(ANDROID_LOG_VERBOSE, APPNAME, "png init!!!! sdl: %s", SDL_GetError());
+		return 1;
+	}
+
+	if (TTF_Init() == -1){
+		printf( "SDL_ttf could not initialize! SDL_ttf Error: %s\n", TTF_GetError() );
+		__android_log_print(ANDROID_LOG_VERBOSE, APPNAME, "ttf!!!! sdl: %s", TTF_GetError());
+		return 1;
+	}
+
+	initGL();
+	score_font = TTF_OpenFont("HyperspaceBold.ttf", (int)(SCREEN_HEIGHT * 0.04));	// Font for scorebar
+	title_font = TTF_OpenFont("spaceranger.ttf", (int)(SCREEN_HEIGHT * 0.14));	// was 24 88 44
+	menu_font = TTF_OpenFont("HyperspaceBold.ttf", (int)(SCREEN_HEIGHT * 0.08));
+	SDL_SetRelativeMouseMode(1);
+	return 0;
+
+}	// end of sdl_init
+
+void initGL(){
+
+	GLenum error = GL_NO_ERROR;
+
+	//Initialize Projection Matrix
+	glMatrixMode( GL_PROJECTION );
+	glLoadIdentity();
+	glOrthof (0, SCREEN_WIDTH, SCREEN_HEIGHT, 0, -10, 10);
+	//Check for error
+	error = glGetError();
+	if (error != GL_NO_ERROR){
+		printf("Error initializing OpenGL! %d\n", error);
+	}
+
+	//Initialize Modelview Matrix
+	glMatrixMode( GL_MODELVIEW );
+	glLoadIdentity();
+	glPushMatrix();
+	//Check for error
+	error = glGetError();
+	if (error != GL_NO_ERROR){
+		printf( "Error initializing OpenGL! %d\n", error);
+	}
+
+	//Initialize clear color
+	glClearColor( 0.f, 0.f, 0.f, 1.f );
+ //      glEnable(GL_PROGRAM_POINT_SIZE);
+	//glDepthMask(0);
+	glEnable(GL_BLEND);
+	glEnable(GL_LINE_SMOOTH);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+	glHint(GL_LINE_SMOOTH_HINT,  GL_NICEST);
+	glLineWidth(1.8);
+	// get current screens resolution and set our viewport to fill the screen
+	SDL_DisplayMode dm;
+	SDL_GetDesktopDisplayMode(0, &dm);
+
+	glViewport(0, 0, dm.w, dm.h);
+
+}
+
+void close_sdl(){
+
+	for (int i=0;i<MAX_SOUNDS;++i){
+		if (sound[i].effect != NULL){
+			Mix_FreeChunk(sound[i].effect);
+		}
+	}
+
+ 	Mix_CloseAudio();
+	TTF_CloseFont(score_font);TTF_CloseFont(title_font);TTF_CloseFont(menu_font);
+	score_font = NULL;
+	SDL_DestroyRenderer(myrenderer);
+	myrenderer = NULL;
+	SDL_DestroyWindow(mywindow);
+	mywindow = NULL;
+	free(explode);
+	free(parts);
+	TTF_Quit();
+	IMG_Quit();
+	SDL_Quit();
+
+
+}
+
+GLuint load_texture(const char *s){
+
+	GLuint newtexture;
+	newtexture = 0;
+	SDL_Surface* loaded = IMG_Load(s);
+	if (loaded == NULL){
+		printf("file not here? sdl: %s\n", SDL_GetError());
+	}
+
+	else{	
+		glGenTextures(1, &newtexture);
+		glBindTexture(GL_TEXTURE_2D, newtexture);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, loaded->w, loaded->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, loaded->pixels);
+		GLenum error = GL_NO_ERROR;
+		SDL_FreeSurface(loaded);
+	}
+
+	return newtexture;
+
+}	// end load_texture
+
+int power_two(int n){
+	unsigned int x;
+	x = n;
+	x--;
+    x |= x >> 1;  // handle  2 bit numbers
+    x |= x >> 2;  // handle  4 bit numbers
+    x |= x >> 4;  // handle  8 bit numbers
+    x |= x >> 8;  // handle 16 bit numbers
+    x |= x >> 16; // handle 32 bit numbers
+    x++;
+
+    return (int)x;
+}
+
+void render_text(texture *t, char s[], int c, int size){
+
+	TTF_Font 		*text_font = NULL;
+
+	SDL_Color 		col = {53, 128, 35};
+	SDL_Color 		col2 = {255, 255, 255};
+	SDL_Color 		col3 = {17, 126, 255};
+	SDL_Surface* 	load_text = NULL;
+
+	// 24 is magic size for scorebar
+	if (size == 24){
+		load_text = TTF_RenderText_Blended(score_font, s, col2);
+	}
+	// high scores
+	else if (size == 22){
+
+		load_text = TTF_RenderText_Blended(score_font, s, col3);
+	}
+
+	else{
+		
+	if (size == 48)
+		text_font = menu_font;
+	if (size == 88)
+		text_font = title_font;
+		
+	if (c == 0)
+		load_text = TTF_RenderText_Blended(text_font, s, col);
+	else if (c == 1)
+		load_text = TTF_RenderText_Blended(text_font, s, col2);
+	else
+		load_text = TTF_RenderText_Blended(text_font, s, col3);
+
+	}
+
+
+//	SDL_Rect dstRect;
+//	if (size != 24){
+//		    dstRect.x = (resized->w - load_text->w)/2;
+//		    dstRect.y = (resized->h - load_text->h)/2;
+//		    dstRect.w = load_text->w;
+//		    dstRect.h = load_text->h;
+//	}
+//	else {
+//		dstRect.x = 0;
+//		dstRect.y = 0;
+//		dstRect.w = load_text->w;
+//	    dstRect.h = load_text->h;
+//	}
+
+
+	//SDL_BlitSurface(load_text, 0, resized, &dstRect);
+	//SDL_BlitSurface(load_text, 0, resized, 0);
+	int p2x;
+	int p2y;
+	p2x = power_two(load_text->w);
+	p2y = power_two(load_text->h);
+	SDL_Surface* 	resized = SDL_CreateRGBSurface(0, power_two(load_text->w), power_two(load_text->h), 32, 0, 0, 0, 0);
+	t->w = load_text->w;
+	t->h = load_text->h;
+	int offsetx = (p2x - t->w)/2 - 1;
+	int offsety = (p2y - t->h)/2 - 1;
+	glGenTextures(1, &t->t);
+	glBindTexture(GL_TEXTURE_2D, t->t);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, p2x, p2y, 0, GL_RGBA, GL_UNSIGNED_BYTE, resized->pixels);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, offsetx, offsety, t->w, t->h, GL_RGBA, GL_UNSIGNED_BYTE, load_text->pixels);
+	t->w = p2x;
+	t->h = p2y;
+	SDL_FreeSurface(load_text);
+	SDL_FreeSurface(resized);
+	load_text = NULL;
+	resized = NULL;
+	text_font = NULL;
+	return;
+}
+
+void draw_background(GLuint stars){
+
+	float x = camera.x/SCREEN_WIDTH;
+	float y = camera.y/SCREEN_HEIGHT;
+	
+	glMatrixMode(GL_MODELVIEW);
+
+	glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, stars);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	GLfloat tex[] = {0 - x, 1 - y,
+						 0 - x, 0 - y,
+						 1 - x, 1 - y,
+						 1 - x, 0 - y};
+
+	GLfloat box[] = {0, SCREEN_HEIGHT, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_WIDTH, 0};
+	glColor4f( 0.5, 1.0, 1.0, 1.0 );
+
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+
+	glVertexPointer(2, GL_FLOAT, 0, box);
+	glTexCoordPointer(2, GL_FLOAT, 0, tex);
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+	glDisable(GL_TEXTURE_2D);
+	glDisableClientState(GL_VERTEX_ARRAY);
+	glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+}
+
+void draw_scorebar(Player *p, int mode){
+
+	static texture t1;
+	static texture t2;
+	static int old_score;
+	static int old_lives;
+	static int old_shield;
+	static int old_score2;
+	static int old_lives2;
+	static int old_shield2;
+	char str[55];
+	char str2[55];
+	
+	GLfloat tex[] = {0, 1, 0, 0, 1, 1, 1, 0};
+	//glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	//glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	if (p[0].score != old_score || p[0].lives != old_lives || (int)p[0].sh.shield_power != old_shield){
+		
+		glDeleteTextures(1, &t1.t);
+		
+		sprintf(str, "SCORE: %05d    LIVES: %d    SHIELD: %2d", p[0].score, p[0].lives, (int)p[0].sh.shield_power);
+		render_text(&t1, str, 1, 24);
+	}
+
+	glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, t1.t);
+	//GLfloat box[] = {10, t1.h, 10, 0, t1.w + 10, t1.h, t1.w + 10, 0};
+	GLfloat box[] = {SCREEN_WIDTH/2 - t1.w/2, t1.h,
+					 SCREEN_WIDTH/2 - t1.w/2, 0,
+					 SCREEN_WIDTH/2 + t1.w/2, t1.h,
+					 SCREEN_WIDTH/2 + t1.w/2, 0};
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+ 
+	glVertexPointer(2, GL_FLOAT, 0,box);
+	glTexCoordPointer(2, GL_FLOAT, 0, tex);
+	glColor4f( 1.0, 1.0, 0.5, 1.0 );
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+ 
+	glDisableClientState(GL_VERTEX_ARRAY);
+	glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+	glDisable(GL_TEXTURE_2D);
+	
+	old_score = p[0].score;
+	old_lives = p[0].lives;
+	old_shield = (int)p[0].sh.shield_power;
+
+	if (mode > 0){
+		if (p[1].score != old_score2 || p[1].lives != old_lives2 || (int)p[1].sh.shield_power != old_shield2){
+
+			glDeleteTextures(1, &t2.t);
+			sprintf(str2, "SCORE: %05d    LIVES: %d    SHIELD: %2d", p[1].score, p[1].lives, (int)p[1].sh.shield_power);
+			render_text(&t2, str2, 1, 24);
+		}
+
+		glEnable(GL_TEXTURE_2D);
+		glBindTexture(GL_TEXTURE_2D, t2.t);
+		GLfloat box2[] = {SCREEN_WIDTH - 10 - t2.w, t2.h,
+						  SCREEN_WIDTH - 10 - t2.w, 0,
+						  SCREEN_WIDTH -10, t2.h,
+						  SCREEN_WIDTH -10, 0};
+
+		glEnableClientState(GL_VERTEX_ARRAY);
+		glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+	 
+		glVertexPointer(2, GL_FLOAT, 0,box2);
+		glTexCoordPointer(2, GL_FLOAT, 0, tex);
+		glColor4f(0.5, 1.0, 1.0, 1.0);
+		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	 
+		glDisableClientState(GL_VERTEX_ARRAY);
+		glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+		glDisable(GL_TEXTURE_2D);
+
+		old_score2 = p[1].score;
+		old_lives2 = p[1].lives;
+		old_shield2 = (int)p[1].sh.shield_power;
+	}
+}
+
+void draw_asteroids(asteroid *field){
+
+	static GLfloat asteroid_offsets[22] = {0, 0, 0, -5, 3, -4, 3, -2, 4, 1, 2, 5, -2, 5, -4, 0, -3, -2, -2, -2, 0, -5};
+	static GLfloat colors1[44] = {  0.9f, 0.3f, 0.6f,1.0f,
+									0.5f, 0.3f, 0.0f,1.0f,
+									0.5f, 0.3f, 0.0f,1.0f,
+									0.5f, 0.3f, 0.0f,1.0f,
+									0.5f, 0.3f, 0.0f,1.0f,
+									0.5f, 0.3f, 0.0f,1.0f,
+									0.5f, 0.3f, 0.0f,1.0f,
+									0.5f, 0.3f, 0.0f,1.0f,
+									0.5f, 0.3f, 0.0f,1.0f,
+									0.5f, 0.3f, 0.0f,1.0f,
+									0.5f, 0.3f, 0.0f, 1.0f};
+	
+	for (int i = 0; i < no_of_asteroids; i++){
+		
+		glEnableClientState(GL_VERTEX_ARRAY);
+		glEnableClientState(GL_COLOR_ARRAY);
+		
+		glVertexPointer(2, GL_FLOAT, 0, asteroid_offsets);
+		glColorPointer(4, GL_FLOAT, 0, colors1);
+		glPushMatrix();
+		
+		glTranslatef(field[i].position.x, field[i].position.y, 0);
+		glRotatef(field[i].angle * 180/PI, 0, 0, 1);
+		glScalef(field[i].size, field[i].size, 0);
+	
+		glDrawArrays(GL_TRIANGLE_FAN, 0, 11);
+		glPopMatrix();
+
+		glDisableClientState(GL_VERTEX_ARRAY);
+		glDisableClientState(GL_COLOR_ARRAY);
+	}
+}
+
+void draw_ship(ship *sh, int type){
+
+	static float ship_offsets[12] = {0, 0, 12, 0, -8, 8, -4, 0, -8, -8, 12, 0};
+	static float ship_offsets2[12] = {0, 0, 14, -8, -8, -8,-4, 0, -8, 8, 14, 8};
+	float *offsets;
+	
+	if (type == 0){
+		glColor4f(0.9f, 0.6f, 0.9f, 0.9f);
+		offsets = ship_offsets;
+	}
+	if (type == 1){
+		glColor4f(0.5f, 0.7f, 0.9f, 0.9f);
+		offsets = ship_offsets;
+	}
+	if (type == 2){
+		glColor4f(0.5f, 0.9f, 0.3f, 0.9f);
+		offsets = ship_offsets2;
+	}
+	
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glVertexPointer(2, GL_FLOAT, 0, offsets);
+	glPushMatrix();
+		glTranslatef(sh->position.x, sh->position.y, 0);
+		glRotatef(sh->angle * 180/PI, 0, 0, 1);
+		glDrawArrays(GL_TRIANGLE_FAN, 0, 6);
+	glPopMatrix();
+	glDisableClientState(GL_VERTEX_ARRAY);
+
+	// DRAW THRUST
+	GLfloat colors[4*12]; 		// should malloc static in init parts??
+	GLfloat vertices[2*12];		// thruster has upto 12 particles
+	int ci = 0;					// index for colour array 
+	int vi = 0;					// index for vertex array
+
+	for (int i= 0; i < 12; ++i){
+		if (sh->thrust[i].state == 1){
+			
+			sh->thrust[i].position.x += sh->thrust[i].velocity.x * DELTA;
+			sh->thrust[i].position.y += sh->thrust[i].velocity.y * DELTA;
+			
+			colors[ci++] = 1.8* sh->thrust[i].age;
+			colors[ci++] = 1.05* sh->thrust[i].age;
+			colors[ci++] = 1.5* sh->thrust[i].age;
+			colors[ci++] = 1 * sh->thrust[i].age;
+			vertices[vi++] = sh->thrust[i].position.x;
+			vertices[vi++] = sh->thrust[i].position.y;
+			
+			sh->thrust[i].age -= 0.01;
+			if ( sh->thrust[i].age < 0.1)
+				sh->thrust[i].state = 0;
+		}
+	}
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glEnableClientState(GL_COLOR_ARRAY);
+	
+	glVertexPointer(2, GL_FLOAT, 0, vertices);
+	glColorPointer(4, GL_FLOAT, 0, colors);
+	glDrawArrays(GL_POINTS, 0, vi/2);
+
+	glDisableClientState(GL_VERTEX_ARRAY);
+	glDisableClientState(GL_COLOR_ARRAY);
+}
+
+void draw_shield(ship *sh){
+
+	static float ship_shield[68] = {0, 0, 16, 0, 15, 3, 14, 6, 13, 9, 11, 11, 8, 13, 5, 14, 2, 15, 0, 15,
+	-3, 15, -6, 14, -9, 12, -11, 10, -13, 8, -15, 5, -15, 2, -15, 0,
+	-15, -4, -14, -7, -12, -9, -10, -12, -7, -13, -4, -15, -1, -15,
+	1, -15, 4, -15, 7, -14, 10, -12, 12, -10, 14, -7, 15, -4, 15, -1, 16, 0};
+
+		
+	glColor4ub(237, 245, 50, 70);
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glVertexPointer(2, GL_FLOAT, 0, ship_shield);
+	glPushMatrix();
+		glTranslatef(sh->position.x, sh->position.y, 0);
+		glDrawArrays(GL_TRIANGLE_FAN, 0, 34);
+	glPopMatrix();
+	glDisableClientState(GL_VERTEX_ARRAY);
+}
+
+void draw_bullets(bullet *bulls){
+
+	GLfloat vertices[2*MAX_BULLETS];
+	glColor4f(0.9f, 0.7f, 0.7f, 1);
+	glPointSize(3);
+	int vi = 0;
+	
+	for (int i = 0; i < MAX_BULLETS; ++i){
+		if (bulls[i].position.x != -99999){
+			vertices[vi++] = bulls[i].position.x;
+			vertices[vi++] = bulls[i].position.y;
+		}
+	}
+
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glVertexPointer(2, GL_FLOAT, 0, vertices);
+	glDrawArrays(GL_POINTS, 0, vi/2);
+	glDisableClientState(GL_VERTEX_ARRAY);
+}
+
+void draw_particles(){
+
+	GLfloat colors[4*MAX_PARTICLES]; 		// should malloc static in init parts??
+	GLfloat vertices[2*MAX_PARTICLES];
+	
+	int ci;		// index for colour array 
+	int vi;		// index for vertex array
+	ci = 0;vi = 0;
+	for (int i= 0; i < MAX_PARTICLES; ++i){
+		if (parts[i].state == 1){
+			colors[ci] = 1.2* parts[i].age;		// calculate colours of each living particle and put in array
+			colors[ci+1] = 0.7* parts[i].age;
+			colors[ci+2] = 0.6* parts[i].age;
+			colors[ci+3] = 0.5* parts[i].age;
+			ci = ci + 4;
+
+			vertices[vi] = parts[i].position.x;		// insert particles position to vertex array
+			vertices[vi+1] = parts[i].position.y;
+			vi = vi + 2;
+			parts[i].position.x += parts[i].velocity.x * DELTA;
+			parts[i].position.y += parts[i].velocity.y * DELTA;
+
+			parts[i].age -= 0.001;
+			if (parts[i].age < 0.01)
+				parts[i].state = 0;
+		}
+		
+	}
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glEnableClientState(GL_COLOR_ARRAY);
+
+	glPointSize(2);
+	glVertexPointer(2, GL_FLOAT, 0, vertices);
+	glColorPointer(4, GL_FLOAT, 0, colors);
+	glDrawArrays(GL_POINTS, 0, vi/2);
+
+	glPointSize(7);
+	glVertexPointer(2, GL_FLOAT, 0, vertices);
+	glColorPointer(4, GL_FLOAT, 0, colors);
+	glDrawArrays(GL_POINTS, 0, vi/2);
+	
+	glDisableClientState(GL_VERTEX_ARRAY);
+	glDisableClientState(GL_COLOR_ARRAY);
+
+	glPointSize(1);
+}
+
+void draw_explosion(explosion *e){
+
+	static const GLfloat fan[68] = {0, 0, 16, 0, 15, 3, 14, 6, 13, 9, 11, 11, 8, 13, 5, 14, 2, 15, 0, 15,
+									-3, 15, -6, 14, -9, 12, -11, 10, -13, 8, -15, 5, -15, 2, -15, 0,
+									-15, -4, -14, -7, -12, -9, -10, -12, -7, -13, -4, -15, -1, -15,
+									1, -15, 4, -15, 7, -14, 10, -12, 12, -10, 14, -7, 15, -4, 15, -1, 16, 0};
+	static const GLfloat colors1[272] =
+		{1, 0.78, 0.7, 0.9, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4,
+		1, 0.78, 0.7, 0.3, 1, 0.7, 0.2, 0.4};
+	
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glEnableClientState(GL_COLOR_ARRAY);
+	glBlendFunc(GL_ONE, GL_ONE);
+	glVertexPointer(2, GL_FLOAT, 0, fan);
+	glColorPointer(4, GL_FLOAT, 0, colors1);
+	glPushMatrix();
+
+	glTranslatef(e->x, e->y, 0);
+	glRotatef(e->age * 6, 0, 0, 1);
+	if (e->age > 2)
+		glScalef(4 - e->age, 4 - e->age, 0);
+	if (e->age < 2)
+		glScalef(0.1 + e->age, 0.1 + e->age, 0);
+	
+	glDrawArrays(GL_TRIANGLE_FAN, 0, 34);
+
+	glPopMatrix();
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+	glDisableClientState(GL_VERTEX_ARRAY);
+	glDisableClientState(GL_COLOR_ARRAY);
+	
+}
+
+void level_transition(int level){
+
+	char text[12];
+	int quit = 0;
+	int startTicks;
+	int timer = 0;
+	SDL_Event e;
+	play_sound(ENTRY, 0);
+	startTicks = SDL_GetTicks(); 
+	sprintf(text, "level %d", level);
+			
+	while (!quit){
+		
+		glClear (GL_COLOR_BUFFER_BIT);
+		glColor4f(1,1,1,1);
+		draw_menu_item(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, text, 2, 88);
+		while (SDL_PollEvent(&e) != 0){		// check for key event
+
+			timer = SDL_GetTicks() - startTicks;
+
+			if (timer < 800)		// timer so we see level message after frantic end of level firing
+				break;
+			if(e.type == SDL_KEYDOWN || (SDL_GetMouseState(NULL, NULL) & SDL_BUTTON(SDL_BUTTON_LEFT))){
+				quit = 1;
+			}
+		}
+		
+		SDL_GL_SwapWindow(mywindow);
+		SDL_Delay(50);		
+	}
+}
+
